@@ -324,7 +324,7 @@ def simulate_ct(ta_range: np.array, name: str, ta_step: int = 2, phi_step: float
     for ta in ta_range:  # np.arange(10, 31, ta_step)
         phi_d = dict()
         tower_range = None if ta <= 20 else range(ta, 41, 2)
-        for _phi in [0.1]:  # np.arange(0.2, 1.01, phi_step)
+        for _phi in np.arange(0.2, 1.01, phi_step):  # np.arange(0.2, 1.01, phi_step)
             phi = round(_phi, 2)
             logger.info(f"@ {time.strftime('%d.%m.%Y %H:%M:%S')}: \t Calculating step for phi = {phi} and ta = {ta}")
             t_m, phi_m = (ta + ta_step) / 2, (phi + phi_step) / 2
@@ -369,8 +369,8 @@ if __name__ == '__main__':
     processes_list = list()
     proc_1 = mlp.Process(
         target=simulate_ct,
-        # args=(np.arange(10, 21, 2), 'range_1')
-        args=([15], 'range_1')
+        args=(np.arange(10, 21, 2), 'range_1')
+        # args=([15], 'range_1')
     )
     processes_list.append(proc_1)
     proc_1.start()
@@ -378,8 +378,8 @@ if __name__ == '__main__':
     # second range
     proc_2 = mlp.Process(
         target=simulate_ct,
-        # args=(np.arange(20, 31, 2), 'range_2')
-        args=([25], 'range_2')
+        args=(np.arange(20, 31, 2), 'range_2')
+        # args=([25], 'range_2')
     )
     processes_list.append(proc_2)
     proc_2.start()

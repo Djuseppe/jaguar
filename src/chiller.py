@@ -33,6 +33,7 @@ class Chiller:
         self.eff_25 = self.read_csv(os.path.join('..', 'data', 'csv', 'chiller_eff_25.csv'))
         self.eff_30 = self.read_csv(os.path.join('..', 'data', 'csv', 'chiller_eff_30.csv'))
         self.ch = pd.concat([self.eff_22, self.eff_25, self.eff_30], axis=0)
+        self.heat_eva_max = 6_600
 
     @staticmethod
     def read_csv(f_name):
@@ -107,6 +108,14 @@ class Chiller:
         coeffs_opt, _ = curve_fit(func, x_data, y_data)
         return coeffs_opt
 
+    def get_family_curves(self, q):
+        q = q if q <= self.heat_eva_max else self.heat_eva_max
+        res = list()
+        for t in np.arange(18, 36, 2):
+            w_el, eer = self.get_curve(q, t)
+            res.append((w_el, eer, t, q, w_el * (eer + 1)))
+        return pd.DataFrame(data=res, columns=['w_el', 'eer', 'tc_in', 'hr_eva', 'hr_con'])
+
 
 def main():
     ch = Chiller()
@@ -119,8 +128,6 @@ def main():
         res.append((w_el, eer, t))
     df = pd.DataFrame(data=res, columns=['w_el', 'eer', 'tc_in'])
     print(df)
-
-
     # res = ch.find_closest_values(ch.eff_30.heat_fr.values, q)
     # print(res)
 
