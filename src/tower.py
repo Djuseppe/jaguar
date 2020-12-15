@@ -349,7 +349,7 @@ def interpolate():
 if __name__ == '__main__':
     start_time = time.time()
     # calc()
-    # main()
+    main()
     # curve()
 
     # res = dict()
@@ -366,28 +366,28 @@ if __name__ == '__main__':
 
     # d = simulate_ct()
     # print(d.keys())
-    processes_list = list()
-    proc_1 = mlp.Process(
-        target=simulate_ct,
-        args=(np.arange(10, 21, 2), 'range_1')
-        # args=([15], 'range_1')
-    )
-    processes_list.append(proc_1)
-    proc_1.start()
-
-    # second range
-    proc_2 = mlp.Process(
-        target=simulate_ct,
-        args=(np.arange(20, 31, 2), 'range_2')
-        # args=([25], 'range_2')
-    )
-    processes_list.append(proc_2)
-    proc_2.start()
-
-    # run processes
-    for process in processes_list:
-        process.join()
-
-    # simulate_ct(ta_range=np.array([15]), name='test')
-    # interpolate()
+    # processes_list = list()
+    # proc_1 = mlp.Process(
+    #     target=simulate_ct,
+    #     args=(np.arange(10, 21, 2), 'range_1')
+    #     # args=([15], 'range_1')
+    # )
+    # processes_list.append(proc_1)
+    # proc_1.start()
+    #
+    # # second range
+    # proc_2 = mlp.Process(
+    #     target=simulate_ct,
+    #     args=(np.arange(20, 31, 2), 'range_2')
+    #     # args=([25], 'range_2')
+    # )
+    # processes_list.append(proc_2)
+    # proc_2.start()
+    #
+    # # run processes
+    # for process in processes_list:
+    #     process.join()
+    #
+    # # simulate_ct(ta_range=np.array([15]), name='test')
+    # # interpolate()
     logger.info(f'Elapsed {time.time() - start_time :.2f} sec')

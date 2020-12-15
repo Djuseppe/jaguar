@@ -15,6 +15,7 @@ from matplotlib import pyplot as plt
 # from paths import *
 from utils import plot_df
 # from hp_simulation import HeatPumpModel
+from tower import DataInterpolator
 from chiller import Chiller
 
 logger = logging.getLogger(__name__)
@@ -100,8 +101,48 @@ class Load:
         return df
 
 
-def simulate():
-    pass
+class DataReader:
+    def __init__(self, f_path=None):
+        self.f_path = f_path if f_path is not None else os.path.join('..', 'results', 'results_total.csv')
+
+    def read(self):
+        df = pd.read_csv(self.f_path, index_col=[0], parse_dates=[0])
+        df.rename(mapper={
+            'chiller_el': "w_el_new",
+            'tc_in': "tc_in_new",
+            'eer': "eer_new",
+            'power_tot': "power_tot_new"
+        }, axis=1, inplace=True)
+        return df.drop(['t_tower_old', 'old_consumption', 'tower_wat'], axis=1)
+
+
+def simulate_chillers(write_bool=False):
+    df_sim = pd.read_csv(os.path.join('..', 'data', 'chillers_load_temp.csv'), index_col=[0], parse_dates=[0])
+    chiller = Chiller()
+    interpolator = DataInterpolator()
+    df_sim.loc[(df_sim.load > 0) & (df_sim.tc_in_mean <= 18), 'tc_in_mean'] = 18
+
+    # df_sim = df_sim.iloc[:72, :]
+    res = list()
+    for i, (ind, row) in enumerate(df_sim.iterrows()):
+        chiller_char = chiller.get_family_curves(row.load)
+        df = interpolator.interpolate_df(chiller_char, 'tc_in', row.tc_in_mean)
+        df.index = [ind]
+        if row.load > 0:
+            ch_coeff = row.load / chiller_char.loc[chiller_char.index[0], 'hr_eva']
+        else:
+            ch_coeff = 1
+        if ch_coeff != 1 or row.load > 6_600:
+            logger.info(f'ch_coeff = {ch_coeff:.3f} !')
+        df.loc[:, ['w_el', 'hr_con', 'hr_eva']] *= ch_coeff
+
+        res.append(df)
+    # print()
+    dfr = pd.concat(res, axis=0)
+    dfr.loc[dfr.hr_eva < 1, ['w_el', 'hr_con', 'eer']] = 0
+    if write_bool:
+        dfr.to_csv(os.path.join('..', 'data', 'chillers_sim.csv'))
+    return dfr
 
 
 def grid_search(tower_char: dict, chiller_char: pd.DataFrame, load: float):
@@ -140,7 +181,74 @@ def grid_search(tower_char: dict, chiller_char: pd.DataFrame, load: float):
     # return loss_dict.get(key)
 
 
-def opt(write_bool=False):
+def opt_given_temp(write_bool=False, name='some_name.csv'):
+    data = DataReader(os.path.join('..', 'results', 'config_new.csv')).read()
+
+    weather = WeatherReader().read()
+
+    tower = TowerReader('tower_total_new.pickle').read()
+
+    chiller = Chiller()
+
+    load = Load().read()
+
+    interpolator = DataInterpolator()
+
+    # data_mod = data.drop(data[~data.index.isin(weather.index)].index, axis=0)
+    load_mod = load.drop(load[~load.index.isin(weather.index)].index, axis=0)
+    df_sim = pd.concat([load_mod, weather.loc[weather.index.isin(load_mod.index), :], data.tc_in_old], axis=1)
+    df_sim.loc[(df_sim.load > 0) & (df_sim.tc_in_old <= 18), 'tc_in_old'] = 18
+    df_sim['iteration'] = np.arange(0, df_sim.shape[0], 1)
+    df_sim = df_sim.assign(
+        tower_el=0.0,
+        tower_wat=0.0,
+        chiller_el=0.0,
+        eer=0.0
+    )
+    # cols_to_add = ['tower_el', 'tower_wat', 'chiller_el', 'eer']
+
+    # df_sim = df_sim.loc[(df_sim.index >= datetime(2020, 8, 10, 15)) & (df_sim.index <= datetime(2020, 12, 30)), :]
+    for ind, row in df_sim.iterrows():
+        logger.info(f'Iteration # {int(row.iteration)} \t load = {row.load}')
+        t_key = range_mapper(tower.keys(), row.t_amb)
+        phi_key = range_mapper(tower.get(t_key).keys(), row.rel_hum)
+        tower_char = tower.get(t_key).get(phi_key)
+        chiller_char = chiller.get_family_curves(row.load)
+
+        # simulate chiller.
+        df_chill = interpolator.interpolate_df(chiller_char, 'tc_in', row.tc_in_old)
+        df_chill.index = [ind]
+        if row.load > 0:
+            ch_coeff = row.load / chiller_char.loc[chiller_char.index[0], 'hr_eva']
+        else:
+            ch_coeff = 1
+        if ch_coeff != 1 or row.load > 6_600:
+            logger.info(f'ch_coeff = {ch_coeff:.3f} !')
+
+        df_chill.loc[:, ['w_el', 'hr_con', 'hr_eva']] *= ch_coeff
+
+        # simulate tower.
+        hr_con = df_chill.loc[:, 'hr_con'].values[0]
+        tower_temps = np.array(list(tower_char.keys()))
+        tower_temp_ind = np.argmin(np.abs(tower_temps - row.tc_in_old))
+        tower_temp = tower_temps[tower_temp_ind]
+        df_tower = tower_char.get(tower_temp)
+        df_tower_int = interpolator.interpolate_df(df_tower, 'heat_fr', hr_con)
+        tower_coeff = hr_con / df_tower_int.heat_fr.values[0]
+        df_tower_int.loc[:, ['power_el', 'wat', 'part_load', 'heat_fr']] *= tower_coeff
+
+        # update df_sim with chiller results
+        df_sim.loc[ind, ['chiller_el', 'eer']] = df_chill.loc[:, ['w_el', 'eer']].values[0]
+        # update df_sim with tower results
+        df_sim.loc[ind, ['tower_el', 'tower_wat']] = df_tower_int.loc[:, ['power_el', 'wat']].values[0]
+
+    # save results
+    if write_bool:
+        df_sim.to_csv(os.path.join('..', 'results', name))
+    # print()
+
+
+def opt(write_bool=False, name='some_name.csv'):
     weather = WeatherReader().read()
 
     tower = TowerReader('tower_total_new.pickle').read()
@@ -163,7 +271,7 @@ def opt(write_bool=False):
     )
     cols_to_add = ['tower_el', 'tower_wat', 'chiller_el', 'tc_in', 'eer']
 
-    df_sim = df_sim.loc[(df_sim.index >= datetime(2020, 6, 25)) & (df_sim.index <= datetime(2020, 6, 30)), :]
+    df_sim = df_sim.loc[(df_sim.index >= datetime(2020, 8, 10, 15)) & (df_sim.index <= datetime(2020, 12, 30)), :]
     for ind, row in df_sim.iterrows():
         logger.info(f'Iteration # {int(row.iteration)} \t load = {row.load}')
         t_key = range_mapper(tower.keys(), row.t_amb)
@@ -178,7 +286,7 @@ def opt(write_bool=False):
 
     # save results
     if write_bool:
-        df_sim.to_csv(os.path.join('..', 'results', 'opt.csv'))
+        df_sim.to_csv(os.path.join('..', 'results', name))
     # print()
 
 
@@ -217,6 +325,8 @@ def validate_data():
 
 if __name__ == '__main__':
     start_time = time.time()
-    opt(False)
+    # opt(True)
+    opt_given_temp(False, 'opt_given_temp.csv')
+    # simulate_chillers(True)
     # validate_data()
     logger.info(f'Elapsed {time.time() - start_time :.2f} sec')
